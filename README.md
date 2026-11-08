@@ -1,131 +1,85 @@
-# AI Support Knowledge Assistant
+# AI Support Assistant 2.0
 
-## RAG Architecture with Grounding & Evaluation
-
-A grounded LLM customer-support assistant that uses Retrieval-Augmented Generation (RAG) to answer questions from a controlled knowledge base.
-
-The system retrieves relevant support documentation using semantic search, applies a relevance threshold, and provides the retrieved context to an LLM for response generation.
-
-If sufficient supporting information cannot be found, the assistant refuses to answer rather than generating an unsupported response.
-
----
-
-## Project Overview
-
-This project demonstrates an end-to-end RAG workflow designed around:
-
-- Semantic retrieval
-- Vector search with FAISS
-- OpenAI embeddings
-- Relevance scoring and thresholding
-- Prompt engineering
-- Grounded LLM responses
-- Source attribution
-- Retrieval evaluation
-- Out-of-scope and adversarial testing
-
-The goal was not simply to generate answers, but to control **when the model is allowed to answer and what information it is allowed to use.**
-
----
+A portfolio project demonstrating retrieval-augmented generation (RAG), a FastAPI backend, a Streamlit interface, and an automated evaluation workflow.
 
 ## Architecture
 
-![System Architecture](architecture.png)
+- **Streamlit**: user-facing chat interface.
+- **FastAPI**: `/health` and `/ask` REST endpoints.
+- **FAISS**: normalized-vector similarity search.
+- **OpenAI embeddings**: document and query embeddings.
+- **OpenAI Responses API**: grounded answer generation.
+- **Evaluation suite**: JSON and CSV test reports.
 
-### Pipeline
+## Requirements
 
-User Question
-→ Query Embedding
-→ FAISS Semantic Search
-→ Relevance Filtering
-→ Grounded Prompt
-→ GPT-5-mini
-→ Grounded Response
+- Python 3.11 recommended.
+- An OpenAI API key with access to the configured embedding and chat models.
 
-The knowledge base follows a separate ingestion pipeline:
+## Local setup
 
-Knowledge Documents
-→ Chunking
-→ Embeddings
-→ FAISS Index
-→ Retrieval
+```bash
+python -m venv .venv
+# Windows PowerShell:
+.venv\Scripts\Activate.ps1
+# macOS/Linux:
+source .venv/bin/activate
 
----
+pip install -r requirements.txt
+copy .env.example .env
+```
 
-## Key Design Decisions
+Edit `.env` and add your API key. Never commit `.env`.
 
-### 1. Retrieval before generation
+## Run the backend
 
-The LLM does not receive the entire knowledge base.
+```bash
+uvicorn backend.main:app --reload
+```
 
-Instead, the application retrieves the most relevant chunks and supplies only that context to the model.
+Open API documentation at http://localhost:8000/docs.
 
-### 2. Relevance threshold
+## Run the frontend
 
-Retrieved documents are filtered using a similarity threshold.
+In a second terminal:
 
-This prevents weakly related documents from being treated as evidence.
+```bash
+streamlit run app.py
+```
 
-### 3. Grounded responses
+Open the local Streamlit URL printed in the terminal.
 
-The model is instructed to answer using the retrieved support documentation.
+## Run evaluation
 
-When sufficient information is unavailable, the assistant states that it does not have enough information rather than inventing an answer.
+With the backend dependencies and API key configured:
 
-### 4. Source transparency
+```bash
+python evaluation.py
+```
 
-Retrieved sources and relevance scores are displayed to the user.
+Reports are written to `reports/evaluation_report.json` and `reports/evaluation_results.csv`.
 
-This makes the retrieval process inspectable rather than treating the LLM as a black box.
+## Run unit tests
 
-### 5. Evaluation-driven development
+```bash
+pytest -q
+```
 
-The project includes an evaluation suite containing:
+## Docker
 
-- Relevant support questions
-- Paraphrased questions
-- Out-of-scope questions
-- Adversarial prompts
-- Prompt-injection attempts
+```bash
+docker compose up --build
+```
 
-Current evaluation result:
+The API is exposed on port 8000 and Streamlit on port 8501.
 
-**15/15 tests passed — 100% retrieval accuracy**
+## Evaluation interpretation
 
----
+The current evaluation includes deterministic retrieval/source checks, answer keyword checks, refusal checks, and latency collection. Keyword matching is a lightweight proxy; it is not a semantic correctness metric. Prompt-injection tests cover only the supplied cases and do not establish comprehensive security. Inspect failed examples and report limitations honestly.
 
-## Technology Stack
+## Security and deployment notes
 
-| Component | Technology |
-|---|---|
-| Language | Python |
-| UI | Streamlit |
-| LLM | OpenAI GPT-5-mini |
-| Embeddings | OpenAI text-embedding-3-small |
-| Vector Search | FAISS |
-| Knowledge Base | Markdown |
-| Evaluation | Python test harness |
-| Configuration | Environment variables / `.env` |
-
----
-
-## Project Structure
-
-```text
-AI Support Assistant/
-│
-├── knowledge/
-│   ├── account_help.md
-│   ├── damaged_orders.md
-│   ├── refunds.md
-│   ├── returns.md
-│   └── shipping.md
-│
-├── app.py
-├── rag.py
-├── prompts.py
-├── evaluation.py
-├── test_cases.json
-├── requirements.txt
-├── .gitignore
-└── README.md
+- Keep API keys in environment variables or platform secrets.
+- Add authentication, rate limiting, request logging with redaction, and usage controls before exposing a public production endpoint.
+- The sample knowledge base is demonstration content, not a real company's policy.
+- Do not upload confidential or personal customer data.

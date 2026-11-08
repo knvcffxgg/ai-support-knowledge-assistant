@@ -1,221 +1,77 @@
+import os
+import requests
 import streamlit as st
-from openai import OpenAI
-from dotenv import load_dotenv
 
-from rag import (
-    build_chunks,
-    create_embeddings,
-    build_index,
-    search_knowledge_base
-)
+st.set_page_config(page_title="AI Support Assistant", page_icon="🤖", layout="wide")
 
-
-load_dotenv()
-
-client = OpenAI()
-
+API_URL = os.getenv("API_URL", "http://localhost:8000").rstrip("/")
 
 st.title("AI Customer Support Assistant")
+st.caption("Answers are grounded in the support documents provided to this application.")
 
-st.write(
-    "Ask a question about our customer support policies."
-)
-
-
-# -----------------------------------------
-# BUILD KNOWLEDGE BASE
-# -----------------------------------------
-
-chunks = build_chunks()
-
-st.write(f"Knowledge-base chunks loaded: {len(chunks)}")
-
-embeddings = create_embeddings(chunks)
-
-index = build_index(chunks, embeddings)
 with st.sidebar:
-
-    st.header("System Information")
-
-    st.write(
-        "This assistant uses retrieval-augmented "
-        "generation (RAG) to answer questions from "
-        "company support documentation."
-    )
-
+    st.header("System status")
+    try:
+        health = requests.get(f"{API_URL}/health", timeout=5).json()
+        st.success(f"API online · {health.get('knowledge_chunks', '?')} knowledge chunks")
+        st.caption(f"Embedding model: {health.get('embedding_model', 'configured on server')}")
+    except requests.RequestException:
+        st.error("Backend API unavailable")
+        st.caption(f"Expected API at {API_URL}")
     st.divider()
+    st.caption("This demonstration uses a limited sample support knowledge base. Do not enter personal or payment information.")
 
-    st.write(
-        f"Knowledge chunks: {len(chunks)}"
-    )
+if "messages" not in st.session_state:
+    st.session_state.messages = []
 
-    st.write(
-        "Retrieval: FAISS"
-    )
+for message in st.session_state.messages:
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"])
+        if message.get("sources"):
+            with st.expander("Retrieved sources"):
+                for source in message["sources"]:
+                    st.markdown(f"**{source['source']}** · similarity {source['similarity']:.3f}")
+                    st.write(source["text"])
 
-    st.write(
-        "Embeddings: text-embedding-3-small"
-    )
-
-    st.write(
-        "LLM: GPT-5-mini"
-    )
-
-    st.write(
-        "Grounding: Enabled"
-    )
-
-# -----------------------------------------
-# USER QUESTION
-# -----------------------------------------
-
-question = st.text_input("Customer question:")
-
+question = st.chat_input("Ask about returns, refunds, shipping, damaged orders, or account help")
 
 if question:
+    st.session_state.messages.append({"role": "user", "content": question})
+    with st.chat_message("user"):
+        st.markdown(question)
 
-    results = search_knowledge_base(
-        question,
-        chunks,
-        index,
-        top_k=3,
-        relevance_threshold=0.35
-    )
+    with st.chat_message("assistant"):
+        with st.spinner("Searching support documentation and generating an answer..."):
+            try:
+                response = requests.post(
+                    f"{API_URL}/ask",
+                    json={"question": question},
+                    timeout=90,
+                )
+                response.raise_for_status()
+                result = response.json()
+                answer = result["answer"]
+                st.markdown(answer)
+                st.caption(
+                    f"Latency: {result['latency_ms']:.0f} ms · "
+                    f"Retrieved chunks: {len(result['sources'])}"
+                )
+                if result["sources"]:
+                    with st.expander("Retrieved sources"):
+                        for source in result["sources"]:
+                            st.markdown(
+                                f"**{source['source']}** · similarity {source['similarity']:.3f}"
+                            )
+                            st.write(source["text"])
+                st.session_state.messages.append({
+                    "role": "assistant",
+                    "content": answer,
+                    "sources": result["sources"],
+                })
+            except requests.RequestException as exc:
+                st.error(f"Could not reach the AI service: {exc}")
+                st.info("Check that the FastAPI backend is running and API_URL is correct.")
 
-    if not results:
-
-        st.subheader("AI Response")
-
-        st.write(
-            "I don't have enough information in the "
-            "available support documentation to answer "
-            "that question."
-        )
-
-        st.stop()
-
-   # -------------------------------------
-# DISPLAY RETRIEVED KNOWLEDGE
-# -------------------------------------
-
-    st.subheader("Retrieved Knowledge")
-
-    for result in results:
-
-                    relevance_percent = (
-                        result["relevance"] * 100
-                    )
-
-                    st.markdown(
-                        f"**Source:** `{result['source']}`"
-                    )
-
-                    st.progress(
-                        min(result["relevance"], 1.0)
-                    )
-
-                    st.caption(
-                        f"Relevance Score: "
-                        f"{relevance_percent:.1f}%"
-                    )
-
-                    st.write(
-                        result["text"]
-                    )
-
-                    st.divider()
-
-
-    # -----------------------------------------
-    # BUILD CONTEXT
-    # -----------------------------------------
-
-    context = "\n\n".join(
-        [
-            f"Source: {result['source']}\n"
-            f"{result['text']}"
-            for result in results
-        ]
-    )
-
-
-    # -----------------------------------------
-    # BUILD GROUNDED PROMPT
-    # -----------------------------------------
-
-    prompt = f"""
-You are an AI customer support assistant.
-
-You MUST answer the customer's question using ONLY
-the support documentation provided below.
-
-IMPORTANT RULES:
-
-1. Do not use general knowledge.
-2. Do not use information from your training data.
-3. Do not invent company policies.
-4. Do not assume policies that are not explicitly stated.
-5. If the answer is not contained in the support documentation,
-   say that you do not have enough information.
-
-SUPPORT DOCUMENTATION:
-
-{context}
-
-CUSTOMER QUESTION:
-
-{question}
-"""
-
-
-    # -----------------------------------------
-    # CALL MODEL
-    # -----------------------------------------
-
-    response = client.responses.create(
-        model="gpt-5-mini",
-        input=prompt
-    )
-
-
-    # -----------------------------------------
-    # DISPLAY ANSWER
-    # -----------------------------------------
-
-   
-
-    st.subheader("AI Response")
-
-    st.write(
-        response.output_text
-    )
-
-
-    # -------------------------------------
-    # DISPLAY SOURCES
-    # -------------------------------------
-
-    with st.expander("View Retrieved Sources"):
-
-        for result in results:
-
-            relevance_percent = (
-                result["relevance"] * 100
-            )
-
-            st.markdown(
-                f"### `{result['source']}`"
-            )
-
-            st.progress(
-                min(result["relevance"], 1.0)
-            )
-
-            st.caption(
-                f"Relevance score: "
-                f"{relevance_percent:.1f}%"
-            )
-
-            st.write(
-                result["text"]
-            )
+if st.button("Clear conversation"):
+    st.session_state.messages = []
+    st.rerun()
